@@ -13,6 +13,25 @@ export function timeStringToMinutes(timeStr) {
 }
 
 /**
+ * Local (wall-clock) YYYY-MM-DD for a Date, e.g. "2026-09-28".
+ *
+ * Deliberately NOT date.toISOString().split('T')[0] — that gives the UTC
+ * calendar date, which disagrees with the user's actual local date for
+ * roughly 3 hours a night in a UTC+3 timezone like Nairobi's (from local
+ * midnight until local 03:00, the UTC date is still "yesterday"). Every
+ * "which day is this?" comparison in this file needs to agree with how
+ * CalendarView.jsx determines the day (it already uses local time via
+ * toLocaleDateString), or the engine can silently build free windows for
+ * the wrong day and miss real events synced for today.
+ */
+export function localDateStr(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Formats minutes from midnight into "HH:MM"
  */
 export function minutesToTimeString(minutes) {
@@ -37,16 +56,19 @@ export function calculateFreeWindows({ dateStr, calendarEvents = [], preferences
   // If we're building today's windows, never offer a slot that's already in
   // the past — start from whichever is later: configured wake time, or the
   // actual current clock time. Future dates always start from wake time.
-  const isToday = dateStr === now.toISOString().split('T')[0];
+  // Both sides of this comparison are local dates (see localDateStr above) —
+  // this used to compare a local dateStr against now.toISOString() (UTC),
+  // which silently pointed "today" at the wrong day for ~3 hours a night.
+  const isToday = dateStr === localDateStr(now);
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const effectiveStartMin = isToday ? Math.max(wakeMin, nowMin) : wakeMin;
 
-  // Filter fixed events for this specific date
+  // Filter fixed events for this specific date (local date, matching dateStr)
   const dayEvents = calendarEvents
     .filter(evt => {
       if (!evt.start_time) return false;
       if (evt.origin === 'adaptive') return false; // adaptive tasks aren't protected
-      const evtDate = new Date(evt.start_time).toISOString().split('T')[0];
+      const evtDate = localDateStr(new Date(evt.start_time));
       return evtDate === dateStr;
     })
     .map(evt => {
@@ -61,6 +83,8 @@ export function calculateFreeWindows({ dateStr, calendarEvents = [], preferences
       };
     })
     .sort((a, b) => a.startMin - b.startMin);
+
+  console.log('[Flow DEBUG] dayEvents (after filtering to this date):', dayEvents);
 
   // Derive non-overlapping free intervals between effectiveStartMin and sleep
   const freeWindows = [];
@@ -122,7 +146,7 @@ export function generateAdaptiveSchedule({
   currentDate = new Date(),
   trigger = 'initial_plan'
 }) {
-  const dateStr = currentDate.toISOString().split('T')[0];
+  const dateStr = localDateStr(currentDate);
   const { freeWindows, totalFreeMinutes, fixedEvents } = calculateFreeWindows({
     dateStr,
     calendarEvents,

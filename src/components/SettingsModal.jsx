@@ -27,6 +27,21 @@ export default function SettingsModal({
     setSelectedGoogleCalendars(preferences.google_calendar_ids || []);
   }, [preferences.google_calendar_ids]);
 
+  // Same fix as above, applied to wake/sleep/buffer — these were only ever
+  // read once at first mount, so a saved change could still display the old
+  // default (e.g. 08:00) the next time Settings was reopened.
+  useEffect(() => {
+    setWakeTime(preferences.wake_time || '08:00');
+  }, [preferences.wake_time]);
+
+  useEffect(() => {
+    setSleepTime(preferences.sleep_time || '23:30');
+  }, [preferences.sleep_time]);
+
+  useEffect(() => {
+    setBufferMin(preferences.buffer_minutes || 15);
+  }, [preferences.buffer_minutes]);
+
   if (!isOpen) return null;
 
   const handleSavePreferences = async (e) => {

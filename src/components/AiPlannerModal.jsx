@@ -17,6 +17,7 @@ import {
   suggestStimulationPairing
 } from '../ai/llmService';
 import { generateAdaptiveSchedule } from '../engine/planningEngine';
+import { detectScheduleConflicts, explainConflicts } from '../engine/conflictCheck';
 
 /**
  * A single task row within the results preview — scheduled or postponed.
@@ -193,12 +194,21 @@ export default function AiPlannerModal({
         reality: scheduleResult.reality
       });
 
+      // Check-in: verify this plan never actually overlaps a locked
+      // commitment before it's ever shown as applyable. Defense-in-depth on
+      // top of the scheduler's own free-window math.
+      const conflicts = detectScheduleConflicts({
+        scheduledTasks: scheduleResult.scheduledToday,
+        fixedEvents: scheduleResult.fixedEvents
+      });
+
       setResult({
         parsed,
         updatedDailyState,
         combinedTasks,
         scheduleResult,
-        plainExplanation
+        plainExplanation,
+        conflicts
       });
     } catch (err) {
       console.error('AI planning error:', err);
@@ -311,6 +321,25 @@ export default function AiPlannerModal({
               </div>
             )}
 
+            {/* Check-in: conflict warning, shown before anything can be applied */}
+            {result.conflicts && result.conflicts.length > 0 && (
+              <div className="rounded-2xl bg-[#FFF2F2] border border-[#F5C6C6] p-4 sm:p-5">
+                <h4 className="text-xs font-heading font-bold text-[#9C4A4A] uppercase tracking-wider mb-1.5">
+                  ⚠️ Check-in: this plan clashes with a locked commitment
+                </h4>
+                <p className="text-sm text-[#5C3A3A] leading-relaxed mb-2">
+                  {explainConflicts(result.conflicts)}
+                </p>
+                <ul className="space-y-1">
+                  {result.conflicts.map((c, i) => (
+                    <li key={i} className="text-[11px] text-[#7A4B4B]">
+                      • {c.taskTitle} ({c.taskRange}) overlaps {c.eventTitle} ({c.eventRange})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Plain-Language Explanation / Recommendation */}
             <div className="rounded-2xl bg-[#FFF8FA] border border-[#F7DFE6] p-4 sm:p-5">
               <h4 className="text-xs font-heading font-bold text-[#8A5265] uppercase tracking-wider mb-1.5">
@@ -376,7 +405,9 @@ export default function AiPlannerModal({
               </button>
               <button
                 onClick={handleApply}
-                className="flex items-center gap-1.5 px-6 py-2.5 rounded-full bg-[#F8C8DC] hover:bg-[#F2ADC5] text-[#3E3A3F] text-xs font-semibold shadow-soft transition-colors cursor-pointer"
+                disabled={result.conflicts && result.conflicts.length > 0}
+                title={result.conflicts && result.conflicts.length > 0 ? 'Resolve the conflict above first' : undefined}
+                className="flex items-center gap-1.5 px-6 py-2.5 rounded-full bg-[#F8C8DC] hover:bg-[#F2ADC5] disabled:opacity-40 disabled:cursor-not-allowed text-[#3E3A3F] text-xs font-semibold shadow-soft transition-colors cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Apply to my schedule</span>

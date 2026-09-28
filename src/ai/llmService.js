@@ -3,24 +3,32 @@
 // and summarizes deterministic engine results.
 
 import { getGeminiKey, loadCalendarEvents } from '../data/storage.js';
+import { localDateStr } from '../engine/planningEngine.js';
 
 const GEMINI_MODEL = 'gemini-3.8-flash';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function formatCalendarContext(events, now = new Date()) {
+  // localDateStr (not toISOString) matters here specifically: this builds
+  // each day's label from local midnight, and converting a local-midnight
+  // instant to UTC always lands on the previous calendar day for any
+  // timezone ahead of UTC (e.g. Nairobi, UTC+3) — so with toISOString this
+  // was mislabeling "Today" as yesterday's date on every single call, not
+  // just near midnight, causing real events to be filtered out of the
+  // "Today" summary handed to the model.
   const days = Array.from({ length: 4 }, (_, offset) => {
     const day = new Date(now);
     day.setHours(0, 0, 0, 0);
     day.setDate(day.getDate() + offset);
     return {
-      key: day.toISOString().split('T')[0],
+      key: localDateStr(day),
       label: offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow' : day.toLocaleDateString([], { weekday: 'long' })
     };
   });
 
   const summaries = days.map((day) => {
     const items = events
-      .filter((event) => event.start_time && new Date(event.start_time).toISOString().split('T')[0] === day.key)
+      .filter((event) => event.start_time && localDateStr(new Date(event.start_time)) === day.key)
       .map((event) => {
         const start = new Date(event.start_time);
         const end = event.end_time ? new Date(event.end_time) : null;
@@ -108,7 +116,7 @@ export async function parseNaturalLanguageInput(userInput, currentState = {}) {
   const prompt = `You are the reasoning layer for 'Flow — Adaptive Planner'.
 The user is a university student and software developer with fluctuating energy and time blindness, sometimes managing ADHD, low mood, or a depleted physical state (poor sleep, poor food intake). Be accurate, not literal-minded. Never moralize, never say "just try harder", never assume every mentioned task must happen today.
 
-Current day: ${new Date().toISOString().split('T')[0]}.
+Current day: ${localDateStr(new Date())}.
 Existing calendar commitments: ${calendarSummary}
 User input: "${userInput}"
 

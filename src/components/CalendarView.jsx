@@ -24,8 +24,8 @@ export default function CalendarView({
     return () => clearInterval(id);
   }, []);
 
-  const startHour = 8;
-  const endHour = 24;
+  const startHour = 6;
+  const endHour = 23;
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
 
   const currentDate = new Date();
@@ -96,9 +96,33 @@ export default function CalendarView({
     return result;
   }
 
-  const laidOutFixedEvents = layoutEventsWithColumns(dayFixedEvents);
-
   const isToday = selectedDayOffset === 0;
+
+  // Adaptive tasks scheduled for today, in the same {startMin, endMin} shape
+  // as fixed events, so they can be laid out in the SAME column pass below.
+  // Previously these were positioned independently of fixed events (always
+  // full-width, at a higher z-index) which meant that if a task's computed
+  // time ever genuinely collided with a fixed event (stale calendar sync,
+  // an un-synced calendar, a 'fixed' task that isn't actually protected,
+  // etc.) the task card would render directly on top of — and visually
+  // hide — the class/commitment it was supposed to avoid, instead of the
+  // collision being visible. Laying both out together makes any real
+  // collision show up as side-by-side columns instead of silently masking
+  // the commitment underneath.
+  const dayScheduledTasks = isToday
+    ? scheduledToday
+        .filter((task) => task.startTimeStr && task.endTimeStr)
+        .map((task) => ({
+          id: task.id,
+          kind: 'task',
+          task,
+          startMin: timeStrToMin(task.startTimeStr),
+          endMin: timeStrToMin(task.endTimeStr)
+        }))
+    : [];
+
+  const dayFixedEventsTagged = dayFixedEvents.map((evt) => ({ ...evt, kind: 'fixed' }));
+  const laidOutItems = layoutEventsWithColumns([...dayFixedEventsTagged, ...dayScheduledTasks]);
   const nowHour = currentTime.getHours() + currentTime.getMinutes() / 60;
   const nowInGrid = nowHour >= startHour && nowHour < endHour;
   const nowPct = isToday && nowInGrid
@@ -124,6 +148,11 @@ export default function CalendarView({
       height: `max(36px, ${heightPct}%)`
     };
   };
+
+  function timeStrToMin(timeStr) {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  }
 
   function minToTime(m) {
     const hrs = Math.floor(m / 60).toString().padStart(2, '0');
@@ -243,67 +272,66 @@ export default function CalendarView({
                 />
               ))}
 
-              {laidOutFixedEvents.map((evt) => {
-                const startStr = minToTime(evt.startMin);
-                const endStr = minToTime(evt.endMin);
+              {laidOutItems.map((item) => {
+                const startStr = minToTime(item.startMin);
+                const endStr = minToTime(item.endMin);
                 const style = getItemStyle(startStr, endStr);
-                const widthPct = 100 / evt.totalCols;
-                const leftPct = evt.colIndex * widthPct;
+                const widthPct = 100 / item.totalCols;
+                const leftPct = item.colIndex * widthPct;
+                const sharedPosition = {
+                  ...style,
+                  left: `calc(${leftPct}% + 4px)`,
+                  width: `calc(${widthPct}% - 8px)`,
+                  right: 'auto'
+                };
+
+                if (item.kind === 'task') {
+                  const task = item.task;
+                  return (
+                    <div
+                      key={`task-cal-${item.id}`}
+                      style={sharedPosition}
+                      className="absolute rounded-2xl bg-[#FFF0F4] border border-[#F5D5DE] p-3 shadow-soft text-xs z-20 transition-all hover:border-[#F2ADC5] overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2 h-2 rounded-full bg-[#F2ADC5] shrink-0" />
+                          <span className="font-semibold text-[#3E3A3F] truncate">{task.title}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white text-[#854559] border border-[#FCDCE6] shrink-0">
+                            Load {task.cognitive_load}/5
+                          </span>
+                        </div>
+                        <span className="font-mono text-[11px] text-[#854559] font-medium shrink-0">
+                          {task.startTimeStr} – {task.endTimeStr} ({task.adjustedDuration || task.estimated_duration}m)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
-                    key={`fixed-cal-${evt.id}`}
-                    style={{
-                      ...style,
-                      left: `calc(${leftPct}% + 4px)`,
-                      width: `calc(${widthPct}% - 8px)`,
-                      right: 'auto'
-                    }}
+                    key={`fixed-cal-${item.id}`}
+                    style={sharedPosition}
                     className="absolute rounded-2xl bg-[#FFF9F7] border border-[#EFE4E0] p-2 shadow-soft text-xs z-10 transition-all hover:bg-[#FFF5F2] overflow-hidden"
                   >
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <Lock className="w-3 h-3 text-[#857C82] shrink-0" />
-                        <span className="font-semibold text-[#3E3A3F] truncate">{evt.title}</span>
+                        <span className="font-semibold text-[#3E3A3F] truncate">{item.title}</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between mt-0.5">
                       <span className="text-[10px] font-heading font-medium px-1.5 py-0.5 rounded-full bg-white border border-[#EFE4E0] text-[#786D74] truncate">
-                        {evt.category}
+                        {item.category}
                       </span>
                       <span className="font-mono text-[10px] text-[#7A7077] shrink-0">
                         {startStr}–{endStr}
                       </span>
                     </div>
-                    {evt.location && (
-                      <p className="text-[10px] text-[#91868C] mt-0.5 truncate">{evt.location}</p>
+                    {item.location && (
+                      <p className="text-[10px] text-[#91868C] mt-0.5 truncate">{item.location}</p>
                     )}
-                  </div>
-                );
-              })}
-
-              {isToday && scheduledToday.map((task) => {
-                if (!task.startTimeStr || !task.endTimeStr) return null;
-                const style = getItemStyle(task.startTimeStr, task.endTimeStr);
-
-                return (
-                  <div
-                    key={`task-cal-${task.id}`}
-                    style={style}
-                    className="absolute left-6 right-2 rounded-2xl bg-[#FFF0F4] border border-[#F5D5DE] p-3 shadow-soft text-xs z-20 transition-all hover:border-[#F2ADC5]"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#F2ADC5]" />
-                        <span className="font-semibold text-[#3E3A3F] truncate">{task.title}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-white text-[#854559] border border-[#FCDCE6]">
-                          Load {task.cognitive_load}/5
-                        </span>
-                      </div>
-                      <span className="font-mono text-[11px] text-[#854559] font-medium shrink-0">
-                        {task.startTimeStr} – {task.endTimeStr} ({task.adjustedDuration || task.estimated_duration}m)
-                      </span>
-                    </div>
                   </div>
                 );
               })}
